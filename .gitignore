@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# IDEs
+.vscode/
+
+# Data and model outputs
+model_out/
+*.npy
+*.joblib
+
+# Logs
+*.log
