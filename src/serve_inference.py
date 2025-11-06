@@ -5,6 +5,7 @@ from joblib import load
 from pathlib import Path
 import base64, cv2, numpy as np, json, uuid
 import uvicorn
+from typing import List
 from datetime import datetime
 
 from .features_holistic import run_holistic, draw_holistic
@@ -30,7 +31,7 @@ SAVE_ORIGINAL = False                                      # cambia a True si qu
 app = FastAPI(title="Holistic Classifier + Save Overlay")
 
 class B64Image(BaseModel):
-    image: str  # puede venir con o sin encabezado data:...
+    images: List[str]  # puede venir con o sin encabezado data:...
 
 def b64_to_bgr(b64_str: str):
     raw = base64.b64decode(b64_str.split(',')[-1])
@@ -54,10 +55,10 @@ def load_artifacts():
     ensure_dirs()
 
     pipe = load(MODEL_PATH)
-    THRESH = 0.5
+    THRESH = 0.7
     p = Path(THRESH_PATH)
     if p.exists():
-        THRESH = json.loads(p.read_text()).get("threshold", 0.5)
+        THRESH = json.loads(p.read_text()).get("threshold", 0.7)
 
     # Crear UNA instancia reutilizable de Holistic
     mp_holistic = mp.solutions.holistic
@@ -76,11 +77,15 @@ def close_holistic():
     except Exception:
         pass
 
-@app.post("/predictOne")
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.post("/predict")
 def predict_one(payload: B64Image):
     try:
         # 1) decodificar
-        img = b64_to_bgr(payload.image)
+        img = b64_to_bgr(payload.images[0])
 
         # 2) features + resultados para dibujar
         feat, res = run_holistic(img, holistic=holistic)
@@ -107,9 +112,11 @@ def predict_one(payload: B64Image):
             if ok2:
                 orig_path.write_bytes(buf2.tobytes())
 
+        print("prediction: ",label, " score: ",prob)
+
         # 5) responder sin imagen
         return {
-            "label": label,
+            "prediction": label,
             "score": prob,
             "threshold": THRESH,
             "saved_path": str(out_path)  # para log/GUI
