@@ -117,9 +117,7 @@ def predict_one(payload: B64Image):
         # 5) responder sin imagen
         return {
             "prediction": label,
-            "score": prob,
-            "threshold": THRESH,
-            "saved_path": str(out_path)  # para log/GUI
+            "score": prob
         }
 
     except Exception as e:
@@ -127,3 +125,4 @@ def predict_one(payload: B64Image):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
