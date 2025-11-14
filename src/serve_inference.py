@@ -22,6 +22,9 @@ logging.getLogger("absl").setLevel(logging.ERROR)
 
 import mediapipe as mp  # <-- después de silenciar
 
+OOD_MIN_PRESENCE = 1.0     # al menos 1 canal presente (pose o una mano)
+OOD_MIN_NONZERO  = 10       # cantidad mínima de valores no-cero en features "geométricas"
+OOD_MIN_STD      = 1e-4     # varianza mínima (evita vectores casi constantes)
 
 MODEL_PATH   = 'model_out/holistic_models/holistic_lr.joblib'
 THRESH_PATH  = 'model_out/holistic_models/threshold.json'  # opcional
@@ -40,6 +43,28 @@ def b64_to_bgr(b64_str: str):
     if img is None:
         raise ValueError("Base64 inválido")
     return img
+
+def is_ood_feature(feat: np.ndarray) -> bool:
+    """
+    Heurísticas baratas para detectar OOD / no detección:
+    - presencia: últimas 3 posiciones del vector (pose, left, right) si ADD_PRESENCE_FLAGS=True
+    - escasez de señal: muy pocos no-cero
+    - varianza ínfima: vector 'plano'
+    """
+    # asumimos que las últimas 3 posiciones son presence flags [pose, left, right]
+    presence = feat[-3:]
+    if float(np.sum(presence)) < OOD_MIN_PRESENCE:
+        return True
+
+    core = feat[:-3]  # todo menos presence flags
+    nonzero = int(np.count_nonzero(np.abs(core) > 1e-6))
+    if nonzero < OOD_MIN_NONZERO:
+        return True
+
+    if float(np.std(core)) < OOD_MIN_STD:
+        return True
+
+    return False
 
 def ensure_dirs():
     (SAVE_DIR / 'correcta').mkdir(parents=True, exist_ok=True)
@@ -91,11 +116,22 @@ def predict_one(payload: B64Image):
         feat, res = run_holistic(img, holistic=holistic)
         feat = feat.astype(np.float32).reshape(1, -1)
 
-        # 3) predicción
+        # 3) REGLA OOD: si no reconoce landmarks / señal rara => incorrecta
+        if is_ood_feature(feat[0]):
+            annotated = draw_holistic(img, res)
+            fname = safe_filename("incorrecta", 0.0)
+            out_path = (SAVE_DIR / "incorrecta" / fname)
+            ok, buf = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            if ok:
+                out_path.write_bytes(buf.tobytes())
+
+            return {"prediction": "incorrecta", "score": 0.0, "reason": "ood"}
+
+        # 4) predicción
         prob = float(pipe.predict_proba(feat)[0, 1])
         label = "correcta" if prob >= THRESH else "incorrecta"
 
-        # 4) dibujar y guardar
+        # 5) dibujar y guardar
         annotated = draw_holistic(img, res)
         fname = safe_filename(label, prob)
         out_path = (SAVE_DIR / label / fname)
